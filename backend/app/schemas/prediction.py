@@ -24,3 +24,23 @@ class PredictionResponse(BaseModel):
 
 class ErrorResponse(BaseModel):
     detail: str
+
+class ValidationResponse(BaseModel):
+    smiles: str
+    valid: bool
+    message: str
+
+
+class MoleculeImageResponse(BaseModel):
+    smiles: str
+    image: str = Field(..., description="Base64-kodirana PNG slika")
+
+
+class ExampleMolecule(BaseModel):
+    name: str
+    smiles: str
+    description: str
+
+
+class ExamplesResponse(BaseModel):
+    examples: List[ExampleMolecule]

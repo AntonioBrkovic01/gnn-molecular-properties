@@ -10,16 +10,19 @@ from app.schemas.prediction import (
     PredictionRequest,
     PredictionResponse,
     ToxicityTask,
+    ValidationResponse,
+    MoleculeImageResponse,
+    ExampleMolecule,
+    ExamplesResponse,
 )
 from app.utils.molecule import (
     TOX21_TASKS,
     is_valid_smiles,
     smiles_to_graph,
     categorize_solubility,
+    smiles_to_image_base64,
 )
 
-
-# Globalni state - modeli se učitavaju jednom pri startu servera
 ml_models = {}
 
 MODELS_DIR = Path(__file__).parent / "models"
@@ -27,16 +30,13 @@ MODELS_DIR = Path(__file__).parent / "models"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Učitaj modele pri startu, otpusti pri gašenju."""
     print("Učitavanje modela...")
 
-    # ESOL model (regresija)
     esol_model = GCN(num_features=9, hidden_dim=128, num_tasks=1)
     esol_model.load_state_dict(torch.load(MODELS_DIR / "gcn_esol.pt", weights_only=True))
     esol_model.eval()
     ml_models["esol"] = esol_model
 
-    # Tox21 model (klasifikacija)
     tox_model = GCN(num_features=9, hidden_dim=128, num_tasks=12)
     tox_model.load_state_dict(torch.load(MODELS_DIR / "gcn_tox21.pt", weights_only=True))
     tox_model.eval()
@@ -76,26 +76,20 @@ def health():
 
 @app.post("/predict", response_model=PredictionResponse)
 def predict(request: PredictionRequest):
-    """Predvidi topljivost i toksičnost za zadanu SMILES molekulu."""
     smiles = request.smiles.strip()
 
-    # Validacija
     if not is_valid_smiles(smiles):
         raise HTTPException(status_code=400, detail=f"Neispravan SMILES: '{smiles}'")
 
     try:
-        # Pretvori u graf
         graph = smiles_to_graph(smiles)
 
-        # Predikcija topljivosti (ESOL)
         with torch.no_grad():
             solubility = ml_models["esol"](graph).item()
 
-            # Predikcija toksičnosti (Tox21) - sigmoid daje vjerojatnosti
             tox_logits = ml_models["tox21"](graph)
             tox_probs = torch.sigmoid(tox_logits).squeeze().numpy()
 
-        # Sastavi rezultate toksičnosti
         toxicity_tasks = [
             ToxicityTask(
                 task=task_name,
@@ -117,3 +111,39 @@ def predict(request: PredictionRequest):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Greška pri predikciji: {str(e)}")
+    
+@app.post("/validate", response_model=ValidationResponse)
+def validate(request: PredictionRequest):
+    smiles = request.smiles.strip()
+    valid = is_valid_smiles(smiles)
+    return ValidationResponse(
+        smiles=smiles,
+        valid=valid,
+        message="SMILES je ispravan" if valid else "Neispravan SMILES",
+    )
+
+
+@app.post("/molecule-image", response_model=MoleculeImageResponse)
+def molecule_image(request: PredictionRequest):
+    smiles = request.smiles.strip()
+
+    if not is_valid_smiles(smiles):
+        raise HTTPException(status_code=400, detail=f"Neispravan SMILES: '{smiles}'")
+
+    image = smiles_to_image_base64(smiles)
+    return MoleculeImageResponse(smiles=smiles, image=image)
+
+
+@app.get("/examples", response_model=ExamplesResponse)
+def examples():
+    examples_list = [
+        ExampleMolecule(name="Voda", smiles="O", description="Najjednostavnija molekula"),
+        ExampleMolecule(name="Etanol", smiles="CCO", description="Alkohol u pićima"),
+        ExampleMolecule(name="Kofein", smiles="CN1C=NC2=C1C(=O)N(C(=O)N2C)C", description="Stimulans u kavi i čaju"),
+        ExampleMolecule(name="Aspirin", smiles="CC(=O)OC1=CC=CC=C1C(=O)O", description="Lijek protiv boli i upale"),
+        ExampleMolecule(name="Glukoza", smiles="OC[C@H]1OC(O)[C@H](O)[C@@H](O)[C@@H]1O", description="Šećer u krvi"),
+        ExampleMolecule(name="Paracetamol", smiles="CC(=O)NC1=CC=C(O)C=C1", description="Lijek protiv bolova"),
+        ExampleMolecule(name="Nikotin", smiles="CN1CCCC1c1cccnc1", description="Spoj u duhanu"),
+        ExampleMolecule(name="Heksan", smiles="CCCCCC", description="Lipofilni ugljikovodik"),
+    ]
+    return ExamplesResponse(examples=examples_list)

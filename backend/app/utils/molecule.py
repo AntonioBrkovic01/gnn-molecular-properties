@@ -1,6 +1,10 @@
 import torch
 from torch_geometric.utils import from_smiles
 from rdkit import Chem
+import io
+import base64
+
+from rdkit.Chem import Draw
 
 TOX21_TASKS = [
     'NR-AR', 'NR-AR-LBD', 'NR-AhR', 'NR-Aromatase',
@@ -31,3 +35,18 @@ def categorize_solubility(log_sol: float) -> str:
         return "Slabo topljivo"
     else:
         return "Vrlo slabo topljivo"
+    
+def smiles_to_image_base64(smiles: str, size: int = 400) -> str:
+    
+    mol = Chem.MolFromSmiles(smiles)
+    if mol is None:
+        return None
+
+    img = Draw.MolToImage(mol, size=(size, size))
+
+    buffer = io.BytesIO()
+    img.save(buffer, format='PNG')
+    buffer.seek(0)
+    img_base64 = base64.b64encode(buffer.read()).decode('utf-8')
+
+    return f"data:image/png;base64,{img_base64}"
