@@ -15,11 +15,18 @@ class ToxicityTask(BaseModel):
 class PredictionResponse(BaseModel):
     smiles: str
     valid: bool
+
     solubility: float = Field(..., description="Predviđena topljivost u log mol/L")
-    solubility_category: str = Field(..., description="Kategorija topljivosti")
+    solubility_category: str
+
+    hydration_energy: float = Field(..., description="Slobodna energija hidracije u kcal/mol")
+
+    lipophilicity: float = Field(..., description="Logaritam particijskog koeficijenta (logD)")
+    lipophilicity_category: str
+
     toxicity_tasks: List[ToxicityTask]
-    avg_toxicity_risk: float = Field(..., description="Prosječan rizik toksičnosti (0-1)")
-    high_risk_count: int = Field(..., description="Broj taskova s rizikom > 0.5")
+    avg_toxicity_risk: float
+    high_risk_count: int
 
 
 class ErrorResponse(BaseModel):

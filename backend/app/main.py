@@ -20,11 +20,12 @@ from app.utils.molecule import (
     is_valid_smiles,
     smiles_to_graph,
     categorize_solubility,
+    categorize_lipophilicity,
     smiles_to_image_base64,
 )
 
-ml_models = {}
 
+ml_models = {}
 MODELS_DIR = Path(__file__).parent / "models"
 
 
@@ -37,12 +38,22 @@ async def lifespan(app: FastAPI):
     esol_model.eval()
     ml_models["esol"] = esol_model
 
+    freesolv_model = GCN(num_features=9, hidden_dim=128, num_tasks=1)
+    freesolv_model.load_state_dict(torch.load(MODELS_DIR / "gcn_freesolv.pt", weights_only=True))
+    freesolv_model.eval()
+    ml_models["freesolv"] = freesolv_model
+
+    lipo_model = GCN(num_features=9, hidden_dim=128, num_tasks=1)
+    lipo_model.load_state_dict(torch.load(MODELS_DIR / "gcn_lipo.pt", weights_only=True))
+    lipo_model.eval()
+    ml_models["lipo"] = lipo_model
+
     tox_model = GCN(num_features=9, hidden_dim=128, num_tasks=12)
     tox_model.load_state_dict(torch.load(MODELS_DIR / "gcn_tox21.pt", weights_only=True))
     tox_model.eval()
     ml_models["tox21"] = tox_model
 
-    print("Modeli učitani!")
+    print("Sva 4 modela učitana!")
     yield
 
     ml_models.clear()
@@ -76,6 +87,7 @@ def health():
 
 @app.post("/predict", response_model=PredictionResponse)
 def predict(request: PredictionRequest):
+    """Predvidi topljivost, hidracijsku energiju, lipofilnost i toksičnost."""
     smiles = request.smiles.strip()
 
     if not is_valid_smiles(smiles):
@@ -86,6 +98,8 @@ def predict(request: PredictionRequest):
 
         with torch.no_grad():
             solubility = ml_models["esol"](graph).item()
+            hydration = ml_models["freesolv"](graph).item()
+            lipo = ml_models["lipo"](graph).item()
 
             tox_logits = ml_models["tox21"](graph)
             tox_probs = torch.sigmoid(tox_logits).squeeze().numpy()
@@ -104,6 +118,9 @@ def predict(request: PredictionRequest):
             valid=True,
             solubility=round(solubility, 4),
             solubility_category=categorize_solubility(solubility),
+            hydration_energy=round(hydration, 4),
+            lipophilicity=round(lipo, 4),
+            lipophilicity_category=categorize_lipophilicity(lipo),
             toxicity_tasks=toxicity_tasks,
             avg_toxicity_risk=round(float(tox_probs.mean()), 4),
             high_risk_count=int((tox_probs > 0.5).sum()),
@@ -111,7 +128,8 @@ def predict(request: PredictionRequest):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Greška pri predikciji: {str(e)}")
-    
+
+
 @app.post("/validate", response_model=ValidationResponse)
 def validate(request: PredictionRequest):
     smiles = request.smiles.strip()
