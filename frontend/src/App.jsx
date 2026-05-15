@@ -1,7 +1,11 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import axios from 'axios'
+import { Editor } from 'ketcher-react'
+import { StandaloneStructServiceProvider } from 'ketcher-standalone'
+import 'ketcher-react/dist/index.css'
 
 const API_URL = 'http://localhost:8000'
+const structServiceProvider = new StandaloneStructServiceProvider()
 
 function App() {
   const [smiles, setSmiles] = useState('')
@@ -10,6 +14,8 @@ function App() {
   const [error, setError] = useState(null)
   const [result, setResult] = useState(null)
   const [moleculeImage, setMoleculeImage] = useState(null)
+  const [inputMode, setInputMode] = useState('text') // 'text' ili 'draw'
+  const ketcherRef = useRef(null)
 
   useEffect(() => {
     axios.get(`${API_URL}/examples`)
@@ -17,8 +23,35 @@ function App() {
       .catch(err => console.error('Greška pri učitavanju primjera:', err))
   }, [])
 
+  const handleKetcherInit = (ketcher) => {
+    ketcherRef.current = ketcher
+  }
+
+  const getSmilesFromKetcher = async () => {
+    if (!ketcherRef.current) return null
+    try {
+      const smilesStr = await ketcherRef.current.getSmiles()
+      return smilesStr
+    } catch (err) {
+      console.error('Greška pri čitanju iz Ketcher-a:', err)
+      return null
+    }
+  }
+
   const handlePredict = async () => {
-    if (!smiles.trim()) {
+    let smilesToPredict = smiles
+
+    if (inputMode === 'draw') {
+      const drawnSmiles = await getSmilesFromKetcher()
+      if (!drawnSmiles || !drawnSmiles.trim()) {
+        setError('Nacrtaj molekulu prije predikcije')
+        return
+      }
+      smilesToPredict = drawnSmiles
+      setSmiles(drawnSmiles)
+    }
+
+    if (!smilesToPredict.trim()) {
       setError('Unesi SMILES notaciju molekule')
       return
     }
@@ -30,8 +63,8 @@ function App() {
 
     try {
       const [predictRes, imageRes] = await Promise.all([
-        axios.post(`${API_URL}/predict`, { smiles }),
-        axios.post(`${API_URL}/molecule-image`, { smiles }),
+        axios.post(`${API_URL}/predict`, { smiles: smilesToPredict }),
+        axios.post(`${API_URL}/molecule-image`, { smiles: smilesToPredict }),
       ])
 
       setResult(predictRes.data)
@@ -45,6 +78,7 @@ function App() {
 
   const handleExampleClick = (exampleSmiles) => {
     setSmiles(exampleSmiles)
+    setInputMode('text')
   }
 
   return (
@@ -55,33 +89,85 @@ function App() {
             Predikcija svojstava molekula
           </h1>
           <p className="text-slate-600">
-            Grafovska neuronska mreža za predviđanje topljivosti i toksičnosti
+            Grafovska neuronska mreža za predviđanje fizikalno-kemijskih svojstava i toksičnosti
           </p>
         </header>
 
         <div className="bg-white rounded-xl shadow-md p-6 mb-6">
-          <label className="block text-sm font-medium text-slate-700 mb-2">
-            SMILES notacija molekule
-          </label>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={smiles}
-              onChange={(e) => setSmiles(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handlePredict()}
-              placeholder="npr. CCO (etanol)"
-              className="flex-1 px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none font-mono"
-            />
+          {/* Tab toggle */}
+          <div className="flex gap-2 mb-4 border-b border-slate-200">
             <button
-              onClick={handlePredict}
-              disabled={loading}
-              className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-slate-400 transition font-medium"
+              onClick={() => setInputMode('text')}
+              className={`px-4 py-2 font-medium text-sm border-b-2 transition ${
+                inputMode === 'text'
+                  ? 'border-blue-600 text-blue-600'
+                  : 'border-transparent text-slate-500 hover:text-slate-700'
+              }`}
             >
-              {loading ? 'Računam...' : 'Predvidi'}
+              SMILES unos
+            </button>
+            <button
+              onClick={() => setInputMode('draw')}
+              className={`px-4 py-2 font-medium text-sm border-b-2 transition ${
+                inputMode === 'draw'
+                  ? 'border-blue-600 text-blue-600'
+                  : 'border-transparent text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              Crtanje molekule
             </button>
           </div>
 
-          {examples.length > 0 && (
+          {inputMode === 'text' ? (
+            <>
+              <label className="block text-sm font-medium text-slate-700 mb-2">
+                SMILES notacija molekule
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={smiles}
+                  onChange={(e) => setSmiles(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handlePredict()}
+                  placeholder="npr. CCO (etanol)"
+                  className="flex-1 px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none font-mono"
+                />
+                <button
+                  onClick={handlePredict}
+                  disabled={loading}
+                  className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-slate-400 transition font-medium"
+                >
+                  {loading ? 'Računam...' : 'Predvidi'}
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <label className="block text-sm font-medium text-slate-700 mb-2">
+                Nacrtaj molekulu
+              </label>
+              <div className="border border-slate-300 rounded-lg overflow-hidden" style={{ height: '500px' }}>
+                <Editor
+                  staticResourcesUrl=""
+                  structServiceProvider={structServiceProvider}
+                  onInit={handleKetcherInit}
+                  errorHandler={(msg) => console.error('Ketcher error:', msg)}
+                />
+              </div>
+              <div className="mt-3 flex justify-end">
+                <button
+                  onClick={handlePredict}
+                  disabled={loading}
+                  className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-slate-400 transition font-medium"
+                >
+                  {loading ? 'Računam...' : 'Predvidi'}
+                </button>
+              </div>
+            </>
+          )}
+
+          {/* Examples (samo u text modu) */}
+          {inputMode === 'text' && examples.length > 0 && (
             <div className="mt-4">
               <p className="text-xs text-slate-500 mb-2">Primjeri:</p>
               <div className="flex flex-wrap gap-2">
@@ -126,19 +212,50 @@ function App() {
               </div>
 
               <div className="bg-white rounded-xl shadow-md p-6">
-                <h2 className="text-lg font-semibold text-slate-800 mb-3">
-                  Topljivost
+                <h2 className="text-lg font-semibold text-slate-800 mb-4">
+                  Fizikalno-kemijska svojstva
                 </h2>
-                <div className="text-4xl font-bold text-blue-600 mb-1">
-                  {result.solubility.toFixed(2)}
+
+                <div className="mb-4 pb-4 border-b border-slate-100">
+                  <div className="flex justify-between items-baseline mb-1">
+                    <span className="text-sm text-slate-600">Topljivost</span>
+                    <span className="text-xs text-slate-400">log mol/L</span>
+                  </div>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-2xl font-bold text-blue-600">
+                      {result.solubility.toFixed(2)}
+                    </span>
+                    <span className="text-xs px-2 py-0.5 bg-blue-100 text-blue-800 rounded-full">
+                      {result.solubility_category}
+                    </span>
+                  </div>
                 </div>
-                <div className="text-sm text-slate-500 mb-3">log mol/L</div>
-                <div className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium">
-                  {result.solubility_category}
+
+                <div className="mb-4 pb-4 border-b border-slate-100">
+                  <div className="flex justify-between items-baseline mb-1">
+                    <span className="text-sm text-slate-600">Lipofilnost</span>
+                    <span className="text-xs text-slate-400">logD</span>
+                  </div>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-2xl font-bold text-purple-600">
+                      {result.lipophilicity.toFixed(2)}
+                    </span>
+                    <span className="text-xs px-2 py-0.5 bg-purple-100 text-purple-800 rounded-full">
+                      {result.lipophilicity_category}
+                    </span>
+                  </div>
                 </div>
-                <div className="mt-4 pt-4 border-t border-slate-100">
-                  <p className="text-xs text-slate-500">
-                    Veće vrijednosti = bolje topljivo u vodi
+
+                <div>
+                  <div className="flex justify-between items-baseline mb-1">
+                    <span className="text-sm text-slate-600">Hidracijska energija</span>
+                    <span className="text-xs text-slate-400">kcal/mol</span>
+                  </div>
+                  <div className="text-2xl font-bold text-emerald-600">
+                    {result.hydration_energy.toFixed(2)}
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Negativnije = jača interakcija s vodom
                   </p>
                 </div>
               </div>

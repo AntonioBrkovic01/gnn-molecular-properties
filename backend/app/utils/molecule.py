@@ -50,3 +50,14 @@ def smiles_to_image_base64(smiles: str, size: int = 400) -> str:
     img_base64 = base64.b64encode(buffer.read()).decode('utf-8')
 
     return f"data:image/png;base64,{img_base64}"
+
+def categorize_lipophilicity(logd: float) -> str:
+    """Kategorija lipofilnosti na temelju logD vrijednosti."""
+    if logd < 1:
+        return "Hidrofilno"
+    elif logd < 3:
+        return "Umjereno lipofilno"
+    elif logd < 5:
+        return "Lipofilno"
+    else:
+        return "Vrlo lipofilno"
